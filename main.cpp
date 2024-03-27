@@ -664,12 +664,12 @@ std::vector<int> calculateReductionRate(const std::vector<int>& row_ptr, const s
     return overlap_k;
 }
 
-std::vector<int> calculateReductionRate_OpenMP(const std::vector<int>& row_ptr, const std::vector<int>& col, const std::vector<std::vector<int>>& smallRowptr, const std::vector<std::vector<int>>& smallcol, int N) {
+std::vector<int> calculateReductionRate_OpenMP(const std::vector<int>& row_ptr, const std::vector<int>& col, const std::vector<std::vector<int>>& smallRowptr, const std::vector<std::vector<int>>& smallcol, int N, int readNum) {
     std::vector<std::vector<int>> NumOfBRead(N, std::vector<int>(row_ptr.size() - 1, 0)); // 결과를 저장할 벡터 초기화
 
     // k 별로 분석
     std::vector<int> overlap_k(N, 0);
-    int read_flag=2;
+    int read_flag=readNum;
 
     #pragma omp parallel for shared(overlap_k)
     for (size_t k = 0; k < N; k++) {
@@ -684,6 +684,15 @@ std::vector<int> calculateReductionRate_OpenMP(const std::vector<int>& row_ptr, 
                 // 각 smallcol 마다 계산
                 int B_first_idx = smallRowptr[k][col[j]];
                 int B_end_idx = smallRowptr[k][col[j] + 1];
+                if( k==0 && read_flag>0)
+                {
+                    cout << "j: " << j  << endl;
+                    cout << "col[j]: " << col[j]<< endl;            
+                    cout << "col[j] + 1: " << col[j] + 1<< endl;            
+                    cout << "B_first_idx: " << B_first_idx<< endl;            
+                    cout << "B_end_idx: " << B_end_idx<< endl;     
+                    cout << endl; 
+                }    
                 
                 WillBeReadBVectors.emplace_back();
                 
@@ -696,11 +705,67 @@ std::vector<int> calculateReductionRate_OpenMP(const std::vector<int>& row_ptr, 
 
             int overlap = countEqualValues(WillBeReadBVectors);
             overlap_k[k] += overlap;
+
+            if(k==0 && read_flag>0)
+            {
+                cout << "WillBeReadBVectors"<< endl;
+                cout << "k: " << k << endl;
+            
+            
+                for(size_t i=0; i<WillBeReadBVectors.size(); i++)
+                {
+                    for(size_t j=0; j<WillBeReadBVectors[i].size(); j++)
+                    {
+                        cout << WillBeReadBVectors[i][j] << " ";
+                    }
+                    cout << endl;
+                }   
+                cout << endl;
+                cout << "overlap: " << overlap <<endl;
+            }
+            
+            if(k==0)
+            {
+                read_flag--;
+            }
         }
     }
 
     return overlap_k;
 }
+
+int calculateMAXBRead_OpenMP(const std::vector<int>& row_ptr, const std::vector<int>& col, const std::vector<std::vector<int>>& smallRowptr, const std::vector<std::vector<int>>& smallcol, int N, int readNum) {
+    std::vector<std::vector<int>> NumOfBRead(N, std::vector<int>(row_ptr.size() - 1, 0)); // 결과를 저장할 벡터 초기화
+
+    // k 별로 분석
+
+    int read_flag=readNum;
+    int max_BRead=0;
+    #pragma omp parallel for shared(overlap_k)
+    for (size_t k = 0; k < N; k++) {
+         // 각 행마다 작은 CSR 마다 얼마나 읽어야하는지 계산
+         
+        for (size_t i = 0; i < (row_ptr.size() - 1); i++) {
+            int A_first_idx = row_ptr[i]; // col 한 행의 첫번 째 idx
+            int A_end_idx = row_ptr[i + 1]; // col 한 행의 마지막 idx
+
+            int totalBRead = 0;
+            for (size_t j = A_first_idx; j < A_end_idx; j++) {
+                // 각 smallcol 마다 계산
+                int B_first_idx = smallRowptr[k][col[j]];
+                int B_end_idx = smallRowptr[k][col[j] + 1];
+                totalBRead += (B_end_idx-B_first_idx);
+            }
+            if(max_BRead<(totalBRead))
+            {
+                max_BRead = (totalBRead);
+            }
+        }
+    }
+
+    return max_BRead;
+}
+
 
 int main(int argc , char ** argv)
 {
@@ -856,34 +921,32 @@ int main(int argc , char ** argv)
 
 
 
-
-    // ****각 A의 row마다 B를 얼마나 데이터를 읽어와야하는지 계산
-    // vector<vector<int>> NumOfBRead(N, vector<int> (row_ptr.size(), 0)); // N개의 small csr 마다 행마다 얼마나 읽어야하는 지를 계산
     
+    // small csr 마다 얼마나 읽는지 획안 (얼마나 고르게 읽는지 계산)
     std::vector<std::vector<int>> NumOfBRead = calculateNumOfBRead(row_ptr, col, smallRowptr, N);
-
-    for(size_t i=0; i<NumOfBRead.size();i++) // small csr 엔트리마다
-    {
-        cout << "smallcsr: " << i <<endl;
-        // for(size_t j=0; j<NumOfBRead[i].size();j++)
-        for(size_t j=0; j<20;j++)
-        {
-            cout << NumOfBRead[i][j]<< " ";
-        }
-        cout << endl;
-        cout << endl;
-    }
-    
-
-
-
-
 
  
 
-    // std::vector<int> NumOfBReduction = calculateReductionRate(row_ptr, col, smallRowptr, smallCol, N);
-    // std::vector<int> NumOfBReduction = calculateReductionRate_OpenMP(row_ptr, col, smallRowptr, smallCol, N);
 
+
+
+    // *******************************************************PRINT OPTION start **********
+    std::string configFile = argv[1];
+    parseIniFile(configFile);
+
+    int ReadNum=0;
+    if (settings.find("Settings.PrintWillBeReadBVectors") != settings.end()) {
+        ReadNum = std::stoi(settings["Settings.PrintWillBeReadBVectors"]);
+    }
+    // *******************************************************PRINT OPTION end **********
+
+
+    // Reduction 수 세기
+    // std::vector<int> NumOfBReduction = calculateReductionRate_OpenMP(row_ptr, col, smallRowptr, smallCol, N, ReadNum);
+
+    int MaxcBRead = calculateMAXBRead_OpenMP(row_ptr, col, smallRowptr, smallCol, N, ReadNum);
+
+    cout <<"MaxcBRead: " << MaxcBRead << endl;
 
     // cout << "*** overlap count"<< endl;
     // for(size_t i=0; i<NumOfBReduction.size(); i++)
@@ -894,12 +957,7 @@ int main(int argc , char ** argv)
 
 
 
-
-
-
-    // *******************************************************PRINT OPTION
-    std::string configFile = argv[1];
-    parseIniFile(configFile);
+    // *******************************************************PRINT OPTION start **********
 
     // 읽어온 설정을 사용하여 작업 수행
     if (settings.find("Settings.PrintCsrDistribution") != settings.end() && settings["Settings.PrintCsrDistribution"] == "on") {
